@@ -81,7 +81,9 @@ class MainFragment : Fragment() {
                 if (PermissionUtils.hasCameraPermissions(activity)) {
 
                     setupCamera(activity)
+                    apiObserver(activity)
                 } else {
+
                     requestCameraPermission()
 
                 }
@@ -89,6 +91,16 @@ class MainFragment : Fragment() {
             }
         }
 
+    }
+
+    private fun apiObserver(activity: FragmentActivity) {
+        lifecycleScope.launch {
+            viewmodel.uploadResult.collect {result ->
+                Log.d("api_result","$result")
+                Toast.makeText(activity, "$result", Toast.LENGTH_SHORT).show()
+
+            }
+        }
     }
 
     private fun requestCameraPermission() {
@@ -165,7 +177,7 @@ class MainFragment : Fragment() {
                                     )
 
                                 try {
-                                    viewmodel.uploadImage(multipartBody)
+                                    viewmodel.uploadImage(activity,multipartBody)
 
                                 } catch (e: Exception) {
                                     Log.e("CameraCapture", "Error uploading image", e)

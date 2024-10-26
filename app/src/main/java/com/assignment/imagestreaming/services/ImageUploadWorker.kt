@@ -6,6 +6,7 @@ import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.Worker
 import androidx.work.WorkerParameters
+import com.assignment.imagestreaming.data.NetworkResult
 import com.assignment.imagestreaming.data.service.FileUploadService
 import com.assignment.imagestreaming.utils.AppUtils.compressImage
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -23,7 +24,10 @@ class ImageUploadWorker(
 ) : CoroutineWorker(context, workerParams) {
     override suspend fun doWork(): Result {
         return try {
-            Log.d("ImageUploadWorker", "Starting work with URI: ${inputData.getString(KEY_IMAGE_URI)}")
+            Log.d(
+                "ImageUploadWorker",
+                "Starting work with URI: ${inputData.getString(KEY_IMAGE_URI)}"
+            )
 
             val imageUri = inputData.getString(KEY_IMAGE_URI)
             if (imageUri != null) {
@@ -31,9 +35,11 @@ class ImageUploadWorker(
                 val compressedFile = compressImage(file, 80)
 
                 val requestFile = compressedFile.asRequestBody("image/*".toMediaTypeOrNull())
-                val multipartBody = MultipartBody.Part.createFormData("file", compressedFile.name, requestFile)
+                val multipartBody =
+                    MultipartBody.Part.createFormData("file", compressedFile.name, requestFile)
 
                 val response = uploadService.uploadFile(multipartBody)
+
 
                 if (response.isSuccessful) {
                     Result.success()
