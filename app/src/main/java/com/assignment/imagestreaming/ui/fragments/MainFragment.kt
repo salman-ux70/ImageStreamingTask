@@ -30,10 +30,12 @@ import androidx.work.workDataOf
 import com.assignment.imagestreaming.R
 import com.assignment.imagestreaming.databinding.FragmentMainBinding
 import com.assignment.imagestreaming.extensions.showSettings
+import com.assignment.imagestreaming.model.ImageDbModel
 import com.assignment.imagestreaming.services.ImageUploadWorker
 import com.assignment.imagestreaming.ui.FileUploadViewModel
 import com.assignment.imagestreaming.utils.AppUtils.compressImage
 import com.assignment.imagestreaming.utils.AppUtils.isAppInBackground
+import com.assignment.imagestreaming.utils.AppUtils.isInternetAvailable
 import com.assignment.imagestreaming.utils.PermissionUtils
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import dagger.hilt.android.AndroidEntryPoint
@@ -95,8 +97,8 @@ class MainFragment : Fragment() {
 
     private fun apiObserver(activity: FragmentActivity) {
         lifecycleScope.launch {
-            viewmodel.uploadResult.collect {result ->
-                Log.d("api_result","$result")
+            viewmodel.uploadResult.collect { result ->
+                Log.d("api_result", "$result")
                 Toast.makeText(activity, "$result", Toast.LENGTH_SHORT).show()
 
             }
@@ -150,53 +152,116 @@ class MainFragment : Fragment() {
         }
     }
 
-    private fun captureAndUploadImage(activity: FragmentActivity) {
-        val outputOptions = ImageCapture.OutputFileOptions.Builder(createTempFile()).build()
-        imageCapture.takePicture(
-            outputOptions,
-            ContextCompat.getMainExecutor(activity),
-            object : ImageCapture.OnImageSavedCallback {
-                override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                    val originalFile = outputFileResults.savedUri?.path?.let { File(it) }
-                    if (originalFile != null) {
-                        lifecycleScope.launch {
-                            val compressedFile = compressImage(originalFile, 80)  // 80% quality
-                            if (isAppInBackground(activity)) {
-                                Log.d("WorkerStatus", "app has gone into background")
-                                scheduleImageUpload(originalFile)
-                            } else {
-                                // Convert file to MultipartBody.Part
-                                val requestFile =
-                                    compressedFile.asRequestBody("image/*".toMediaTypeOrNull())
-
-                                val multipartBody =
-                                    MultipartBody.Part.createFormData(
-                                        "file",
-                                        compressedFile.name,
-                                        requestFile
-                                    )
-
-                                try {
-                                    viewmodel.uploadImage(activity,multipartBody)
-
-                                } catch (e: Exception) {
-                                    Log.e("CameraCapture", "Error uploading image", e)
-                                }
-                            }
-
-
-                        }
+    private suspend fun captureAndUploadImage(activity: FragmentActivity) {
+        withContext(Dispatchers.IO) {
+            val outputOptions = ImageCapture.OutputFileOptions.Builder(createTempFile()).build()
+                val dataFromDb = viewmodel.getAllDataFromDb()
+                if (!dataFromDb.isNullOrEmpty()) {
+                    if (!isInternetAvailable(activity)){
+                        return@withContext
+                    }
+                    dataFromDb.forEach { data ->
+                        val fileToUpload = data.imageFile
+                        processFileForUpload(fileToUpload, activity)
 
                     }
 
+                } else {
+                    imageCapture.takePicture(
+                        outputOptions,
+                        ContextCompat.getMainExecutor(activity),
+                        object : ImageCapture.OnImageSavedCallback {
+                            override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                                lifecycleScope.launch {
+                                    val originalFile =
+                                        outputFileResults.savedUri?.path?.let { File(it) }
+                                    if (originalFile != null) {
+
+                                        val compressedFile =
+                                            compressImage(originalFile, 80)  // 80% quality
+                                        if (isAppInBackground(activity)) {
+                                            Log.d("WorkerStatus", "app has gone into background")
+                                            scheduleImageUpload(originalFile)
+                                        } else {
+                                            // Convert file to MultipartBody.Part
+                                            if (isInternetAvailable(activity)) {
+                                                val requestFile =
+                                                    compressedFile.asRequestBody("image/*".toMediaTypeOrNull())
+
+                                                val multipartBody =
+                                                    MultipartBody.Part.createFormData(
+                                                        "file",
+                                                        compressedFile.name,
+                                                        requestFile
+                                                    )
+
+                                                try {
+                                                    viewmodel.uploadImage(activity, multipartBody)
+
+                                                } catch (e: Exception) {
+                                                    Log.e(
+                                                        "CameraCapture",
+                                                        "Error uploading image",
+                                                        e
+                                                    )
+                                                }
+                                            } else {
+                                                val item = ImageDbModel(0, originalFile)
+                                                viewmodel.saveDataToDatabase(item)
+                                            }
+                                        }
+
+
+                                    }
+                                }
+
+
+                            }
+
+                            override fun onError(exception: ImageCaptureException) {
+                                Log.e("CameraCapture", "Error capturing image", exception)
+
+                            }
+                        }
+                    )
                 }
 
-                override fun onError(exception: ImageCaptureException) {
-                    Log.e("CameraCapture", "Error capturing image", exception)
 
+
+        }
+
+    }
+
+    private suspend fun processFileForUpload(
+        fileToUpload: File,
+        activity: FragmentActivity
+    ) {
+        val compressedFile =
+            compressImage(fileToUpload, 80)
+        if (isAppInBackground(activity)) {
+            Log.d("WorkerStatus", "app has gone into background")
+            scheduleImageUpload(fileToUpload)
+        } else {
+            // Convert file to MultipartBody.Part
+            if (isInternetAvailable(activity)) {
+                val requestFile =
+                    compressedFile.asRequestBody("image/*".toMediaTypeOrNull())
+
+                val multipartBody =
+                    MultipartBody.Part.createFormData(
+                        "file",
+                        compressedFile.name,
+                        requestFile
+                    )
+
+                try {
+                    viewmodel.uploadImage(activity, multipartBody)
+
+                } catch (e: Exception) {
+                    Log.e("CameraCapture", "Error uploading image", e)
                 }
             }
-        )
+        }
     }
 
 

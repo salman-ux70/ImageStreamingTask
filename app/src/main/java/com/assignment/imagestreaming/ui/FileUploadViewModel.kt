@@ -3,9 +3,11 @@ package com.assignment.imagestreaming.ui
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.assignment.imagestreaming.data.FileUploadRepository
+import com.assignment.imagestreaming.data.network.FileUploadRepository
 import com.assignment.imagestreaming.data.NetworkResult
+import com.assignment.imagestreaming.data.local.DataBaseRepository
 import com.assignment.imagestreaming.model.ApiError
+import com.assignment.imagestreaming.model.ImageDbModel
 import com.google.gson.Gson
 import com.google.gson.JsonSyntaxException
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -17,10 +19,15 @@ import javax.inject.Inject
 
 @HiltViewModel
 class FileUploadViewModel @Inject constructor(
-    private val fileRepository: FileUploadRepository
+    private val fileRepository: FileUploadRepository,
+    private val dataBaseRepository: DataBaseRepository
 ) : ViewModel() {
+
     private val _uploadResult = MutableStateFlow<NetworkResult<String>>(NetworkResult.Loading)
     val uploadResult: StateFlow<NetworkResult<String>> = _uploadResult
+
+    private val _dbResult = MutableStateFlow<ImageDbModel?>(null)
+    val dbResult: StateFlow<ImageDbModel?> = _dbResult
 
     fun uploadImage(context: Context, file: MultipartBody.Part) {
         viewModelScope.launch {
@@ -58,5 +65,13 @@ class FileUploadViewModel @Inject constructor(
             }
         }
     }
+
+    suspend fun saveDataToDatabase(item: ImageDbModel) {
+        dataBaseRepository.insertdata(item)
+    }
+
+    suspend fun getAllDataFromDb() = dataBaseRepository.getAllImages()
+
+
 
 }

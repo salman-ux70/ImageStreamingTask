@@ -4,11 +4,10 @@ import android.content.Context
 import androidx.work.Configuration
 import androidx.work.WorkManager
 import androidx.work.WorkerFactory
-import com.assignment.imagestreaming.data.FileUploadRepository
-import com.assignment.imagestreaming.data.FileUploadRepositoryImpl
+import com.assignment.imagestreaming.data.network.FileUploadRepository
+import com.assignment.imagestreaming.data.network.FileUploadRepositoryImpl
 import com.assignment.imagestreaming.data.service.FileUploadService
 import com.assignment.imagestreaming.services.ImageUploadWorkerFactory
-import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
