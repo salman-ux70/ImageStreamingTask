@@ -20,6 +20,11 @@ import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.fragment.app.FragmentActivity
 import androidx.fragment.app.viewModels
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.OnLifecycleEvent
 import androidx.lifecycle.lifecycleScope
 import androidx.work.Constraints
 import androidx.work.NetworkType
@@ -34,13 +39,16 @@ import com.assignment.imagestreaming.model.ImageDbModel
 import com.assignment.imagestreaming.services.ImageUploadWorker
 import com.assignment.imagestreaming.ui.FileUploadViewModel
 import com.assignment.imagestreaming.utils.AppUtils.compressImage
+import com.assignment.imagestreaming.utils.AppUtils.fileToMultipartBody
 import com.assignment.imagestreaming.utils.AppUtils.isAppInBackground
 import com.assignment.imagestreaming.utils.AppUtils.isInternetAvailable
 import com.assignment.imagestreaming.utils.PermissionUtils
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -51,11 +59,14 @@ import java.io.File
 import javax.inject.Inject
 
 @AndroidEntryPoint
-class MainFragment : Fragment() {
+class MainFragment : Fragment(), DefaultLifecycleObserver {
     private lateinit var cameraProvider: ProcessCameraProvider
     private lateinit var cameraSelector: CameraSelector
     private lateinit var preview: Preview
     private lateinit var imageCapture: ImageCapture
+
+
+    private var captureJob: Job? = null
 
     @Inject
     lateinit var workManager: WorkManager
@@ -66,6 +77,11 @@ class MainFragment : Fragment() {
     private var mActivity: FragmentActivity? = null
 
     private val viewmodel: FileUploadViewModel by viewModels()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super<Fragment>.onCreate(savedInstanceState)
+        lifecycle.addObserver(this)
+    }
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
@@ -93,6 +109,30 @@ class MainFragment : Fragment() {
             }
         }
 
+    }
+
+    override fun onStart(owner: LifecycleOwner) {
+        super<DefaultLifecycleObserver>.onStart(owner)
+        lifecycleScope.launch {
+            captureImagesContinuously(requireActivity())
+        }
+    }
+
+    // Called when the fragment goes to the background
+    override fun onStop(owner: LifecycleOwner) {
+        super<DefaultLifecycleObserver>.onStop(owner)
+        stopImageCapture()
+    }
+
+    override fun onPause(owner: LifecycleOwner) {
+        super<DefaultLifecycleObserver>.onPause(owner)
+
+        stopImageCapture()
+    }
+
+    private fun stopImageCapture() {
+        captureJob?.cancel()
+        captureJob = null
     }
 
     private fun apiObserver(activity: FragmentActivity) {
@@ -138,98 +178,61 @@ class MainFragment : Fragment() {
             } catch (exc: Exception) {
                 Log.e("CameraX", "Failed to bind use cases", exc)
             }
-            captureImagesContinuously(activity)
+            lifecycleScope.launch {
+
+                captureImagesContinuously(activity)
+            }
         }, ContextCompat.getMainExecutor(activity))
 
     }
 
     private fun captureImagesContinuously(activity: FragmentActivity) {
-        lifecycleScope.launch {
-            while (true) {
-                delay(1000)
-                captureAndUploadImage(activity)
+        captureJob = viewLifecycleOwner.lifecycleScope.launch withContext@{
+
+            withContext(Dispatchers.IO) {
+                val dataFromDb = viewmodel.getAllDataFromDb()
+                if (!dataFromDb.isNullOrEmpty() && !isInternetAvailable(activity)) return@withContext
+                dataFromDb.forEach { data ->
+                    processFileForUpload(data.imageFile, activity)
+
+                }
             }
+            while (isActive) {
+                delay(10000)
+                if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)){
+                    captureAndUploadImage(activity)
+
+                }
+            }
+
+
         }
+
+
     }
 
     private suspend fun captureAndUploadImage(activity: FragmentActivity) {
         withContext(Dispatchers.IO) {
             val outputOptions = ImageCapture.OutputFileOptions.Builder(createTempFile()).build()
-                val dataFromDb = viewmodel.getAllDataFromDb()
-                if (!dataFromDb.isNullOrEmpty()) {
-                    if (!isInternetAvailable(activity)){
-                        return@withContext
-                    }
-                    dataFromDb.forEach { data ->
-                        val fileToUpload = data.imageFile
-                        processFileForUpload(fileToUpload, activity)
-
-                    }
-
-                } else {
-                    imageCapture.takePicture(
-                        outputOptions,
-                        ContextCompat.getMainExecutor(activity),
-                        object : ImageCapture.OnImageSavedCallback {
-                            override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                                lifecycleScope.launch {
-                                    val originalFile =
-                                        outputFileResults.savedUri?.path?.let { File(it) }
-                                    if (originalFile != null) {
-
-                                        val compressedFile =
-                                            compressImage(originalFile, 80)  // 80% quality
-                                        if (isAppInBackground(activity)) {
-                                            Log.d("WorkerStatus", "app has gone into background")
-                                            scheduleImageUpload(originalFile)
-                                        } else {
-                                            // Convert file to MultipartBody.Part
-                                            if (isInternetAvailable(activity)) {
-                                                val requestFile =
-                                                    compressedFile.asRequestBody("image/*".toMediaTypeOrNull())
-
-                                                val multipartBody =
-                                                    MultipartBody.Part.createFormData(
-                                                        "file",
-                                                        compressedFile.name,
-                                                        requestFile
-                                                    )
-
-                                                try {
-                                                    viewmodel.uploadImage(activity, multipartBody)
-
-                                                } catch (e: Exception) {
-                                                    Log.e(
-                                                        "CameraCapture",
-                                                        "Error uploading image",
-                                                        e
-                                                    )
-                                                }
-                                            } else {
-                                                val item = ImageDbModel(0, originalFile)
-                                                viewmodel.saveDataToDatabase(item)
-                                            }
-                                        }
-
-
-                                    }
-                                }
-
-
-                            }
-
-                            override fun onError(exception: ImageCaptureException) {
-                                Log.e("CameraCapture", "Error capturing image", exception)
-
+            imageCapture.takePicture(
+                outputOptions,
+                ContextCompat.getMainExecutor(activity),
+                object : ImageCapture.OnImageSavedCallback {
+                    override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                        lifecycleScope.launch {
+                            outputFileResults.savedUri?.path?.let { path ->
+                                val originalFile = File(path)
+                                processFileForUpload(originalFile, activity)
                             }
                         }
-                    )
+                    }
+
+                    override fun onError(exception: ImageCaptureException) {
+                        Log.e("CameraCapture", "Error capturing image", exception)
+                    }
                 }
-
-
-
+            )
         }
-
     }
 
     private suspend fun processFileForUpload(
@@ -239,20 +242,12 @@ class MainFragment : Fragment() {
         val compressedFile =
             compressImage(fileToUpload, 80)
         if (isAppInBackground(activity)) {
-            Log.d("WorkerStatus", "app has gone into background")
             scheduleImageUpload(fileToUpload)
         } else {
             // Convert file to MultipartBody.Part
             if (isInternetAvailable(activity)) {
-                val requestFile =
-                    compressedFile.asRequestBody("image/*".toMediaTypeOrNull())
-
                 val multipartBody =
-                    MultipartBody.Part.createFormData(
-                        "file",
-                        compressedFile.name,
-                        requestFile
-                    )
+                    fileToMultipartBody(compressedFile)
 
                 try {
                     viewmodel.uploadImage(activity, multipartBody)
@@ -285,7 +280,11 @@ class MainFragment : Fragment() {
                 when (workInfo.state) {
                     WorkInfo.State.ENQUEUED -> Log.d("WorkerStatus", "Worker is enqueued")
                     WorkInfo.State.RUNNING -> Log.d("WorkerStatus", "Worker is running")
-                    WorkInfo.State.SUCCEEDED -> Log.d("WorkerStatus", "Work completed successfully")
+                    WorkInfo.State.SUCCEEDED -> Log.d(
+                        "WorkerStatus",
+                        "Work completed successfully"
+                    )
+
                     WorkInfo.State.FAILED -> Log.d("WorkerStatus", "Work failed")
                     WorkInfo.State.CANCELLED -> Log.d("WorkerStatus", "Work was cancelled")
                     else -> Log.d("WorkerStatus", "Worker state: ${workInfo.state}")
