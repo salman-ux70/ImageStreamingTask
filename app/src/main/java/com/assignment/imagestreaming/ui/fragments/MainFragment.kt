@@ -69,6 +69,7 @@ class MainFragment : Fragment(), DefaultLifecycleObserver {
     private lateinit var preview: Preview
     private lateinit var imageCapture: ImageCapture
 
+    private var numberOfImagesUploaded = 0
 
     private var captureJob: Job? = null
 
@@ -88,8 +89,7 @@ class MainFragment : Fragment(), DefaultLifecycleObserver {
     }
 
     override fun onCreateView(
-        inflater: LayoutInflater, container: ViewGroup?,
-        savedInstanceState: Bundle?
+        inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
     ): View? {
         // Inflate the layout for this fragment
         binding = FragmentMainBinding.inflate(inflater, container, false)
@@ -148,8 +148,10 @@ class MainFragment : Fragment(), DefaultLifecycleObserver {
                     }
 
                     is NetworkResult.Success -> {
-                        Toast.makeText(activity, getString(R.string.success), Toast.LENGTH_SHORT).show()
+                        Toast.makeText(activity, getString(R.string.success), Toast.LENGTH_SHORT)
+                            .show()
                         binding?.imageProgress?.hide()
+                        numberOfImagesUploaded++
                     }
 
                     is NetworkResult.Error -> {
@@ -182,9 +184,9 @@ class MainFragment : Fragment(), DefaultLifecycleObserver {
             }
 
             // Set up the ImageCapture use case
-            imageCapture = ImageCapture.Builder()
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                .build()
+            imageCapture =
+                ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                    .build()
 
             // Select back camera as the default
             cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
@@ -232,10 +234,10 @@ class MainFragment : Fragment(), DefaultLifecycleObserver {
     }
 
     private suspend fun captureAndUploadImage(activity: FragmentActivity) {
+        if (numberOfImagesUploaded >= 3) return
         withContext(Dispatchers.IO) {
             val outputOptions = ImageCapture.OutputFileOptions.Builder(createTempFile()).build()
-            imageCapture.takePicture(
-                outputOptions,
+            imageCapture.takePicture(outputOptions,
                 ContextCompat.getMainExecutor(activity),
                 object : ImageCapture.OnImageSavedCallback {
                     override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
@@ -250,24 +252,20 @@ class MainFragment : Fragment(), DefaultLifecycleObserver {
                     override fun onError(exception: ImageCaptureException) {
                         Log.e("CameraCapture", "Error capturing image", exception)
                     }
-                }
-            )
+                })
         }
     }
 
     private suspend fun processFileForUpload(
-        fileToUpload: File,
-        activity: FragmentActivity
+        fileToUpload: File, activity: FragmentActivity
     ) {
-        val compressedFile =
-            compressImage(fileToUpload, 80)
+        val compressedFile = compressImage(fileToUpload, 80)
         if (isAppInBackground(activity)) {
             scheduleImageUpload(fileToUpload)
         } else {
             // Convert file to MultipartBody.Part
             if (isInternetAvailable(activity)) {
-                val multipartBody =
-                    fileToMultipartBody(compressedFile)
+                val multipartBody = fileToMultipartBody(compressedFile)
 
                 try {
                     viewmodel.uploadImage(activity, multipartBody)
@@ -275,8 +273,8 @@ class MainFragment : Fragment(), DefaultLifecycleObserver {
                 } catch (e: Exception) {
                     Log.e("CameraCapture", "Error uploading image", e)
                 }
-            }else{
-                val imageDbModel = ImageDbModel(0,fileToUpload)
+            } else {
+                val imageDbModel = ImageDbModel(0, fileToUpload)
                 viewmodel.saveDataToDatabase(imageDbModel)
             }
         }
@@ -286,14 +284,10 @@ class MainFragment : Fragment(), DefaultLifecycleObserver {
     private fun scheduleImageUpload(file: File) {
         val imageData = workDataOf(ImageUploadWorker.KEY_IMAGE_URI to file.toUri().toString())
 
-        val uploadWorkRequest = OneTimeWorkRequestBuilder<ImageUploadWorker>()
-            .setInputData(imageData)
-            .setConstraints(
-                Constraints.Builder()
-                    .setRequiredNetworkType(NetworkType.CONNECTED)
-                    .build()
-            )
-            .build()
+        val uploadWorkRequest =
+            OneTimeWorkRequestBuilder<ImageUploadWorker>().setInputData(imageData).setConstraints(
+                    Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
+                ).build()
 
         workManager.enqueue(uploadWorkRequest)
 
@@ -304,8 +298,7 @@ class MainFragment : Fragment(), DefaultLifecycleObserver {
                     WorkInfo.State.ENQUEUED -> Log.d("WorkerStatus", "Worker is enqueued")
                     WorkInfo.State.RUNNING -> Log.d("WorkerStatus", "Worker is running")
                     WorkInfo.State.SUCCEEDED -> Log.d(
-                        "WorkerStatus",
-                        "Work completed successfully"
+                        "WorkerStatus", "Work completed successfully"
                     )
 
                     WorkInfo.State.FAILED -> Log.d("WorkerStatus", "Work failed")
