@@ -2,6 +2,7 @@ package com.assignment.imagestreaming.ui.fragments
 
 import android.Manifest
 import android.content.Context
+import android.media.Image
 import android.os.Bundle
 import android.util.Log
 import androidx.fragment.app.Fragment
@@ -33,7 +34,10 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.assignment.imagestreaming.R
+import com.assignment.imagestreaming.data.NetworkResult
 import com.assignment.imagestreaming.databinding.FragmentMainBinding
+import com.assignment.imagestreaming.extensions.hide
+import com.assignment.imagestreaming.extensions.show
 import com.assignment.imagestreaming.extensions.showSettings
 import com.assignment.imagestreaming.model.ImageDbModel
 import com.assignment.imagestreaming.services.ImageUploadWorker
@@ -138,8 +142,24 @@ class MainFragment : Fragment(), DefaultLifecycleObserver {
     private fun apiObserver(activity: FragmentActivity) {
         lifecycleScope.launch {
             viewmodel.uploadResult.collect { result ->
-                Log.d("api_result", "$result")
-                Toast.makeText(activity, "$result", Toast.LENGTH_SHORT).show()
+                when (result) {
+                    NetworkResult.Loading -> {
+                        binding?.imageProgress?.show()
+                    }
+
+                    is NetworkResult.Success -> {
+                        Toast.makeText(activity, getString(R.string.success), Toast.LENGTH_SHORT).show()
+                        binding?.imageProgress?.hide()
+                    }
+
+                    is NetworkResult.Error -> {
+                        Toast.makeText(activity, "$result", Toast.LENGTH_SHORT).show()
+                        binding?.imageProgress?.hide()
+                    }
+
+
+                }
+
 
             }
         }
@@ -163,7 +183,7 @@ class MainFragment : Fragment(), DefaultLifecycleObserver {
 
             // Set up the ImageCapture use case
             imageCapture = ImageCapture.Builder()
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY) // Optional: Adjust for speed or quality
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                 .build()
 
             // Select back camera as the default
@@ -198,8 +218,8 @@ class MainFragment : Fragment(), DefaultLifecycleObserver {
                 }
             }
             while (isActive) {
-                delay(10000)
-                if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)){
+                delay(1000)
+                if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
                     captureAndUploadImage(activity)
 
                 }
@@ -255,6 +275,9 @@ class MainFragment : Fragment(), DefaultLifecycleObserver {
                 } catch (e: Exception) {
                     Log.e("CameraCapture", "Error uploading image", e)
                 }
+            }else{
+                val imageDbModel = ImageDbModel(0,fileToUpload)
+                viewmodel.saveDataToDatabase(imageDbModel)
             }
         }
     }

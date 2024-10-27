@@ -33,7 +33,8 @@ class FileUploadViewModel @Inject constructor(
         viewModelScope.launch {
             _uploadResult.value = NetworkResult.Loading
             try {
-                when (val response = fileRepository.uploadFile(file)) {
+                val response = fileRepository.uploadFile(file)
+                when (response) {
                     NetworkResult.Loading -> {
                         _uploadResult.value = NetworkResult.Loading
 
